@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityInjector;
 using UnityInjector.Attributes;
-using Object = UnityEngine.Object;
 
 namespace COM3D2.HomuCamera.Plugin
 {
@@ -15,18 +14,31 @@ namespace COM3D2.HomuCamera.Plugin
         private bool screenCreated = false;
         private Rect winRect;
         private PixelValues pv;
-        private float guiWidth = 0.25f;
+        private float guiWidth = 0.4f;
         private Vector2 lastScreenSize;
         MenuType menuType = MenuType.None;
         private Maid maid;
         private GameObject myCamBase;
-        private Vector2 scrollViewVector = Vector2.zero;
-        private Dictionary<string, GameObject> keyValuePairs = new Dictionary<string, GameObject>();
-        private Dictionary<string, HomuCameraTarget> materials = new Dictionary<string, HomuCameraTarget>();
-        private Dictionary<Vector3, HomuCameraTarget2> normals = new Dictionary<Vector3, HomuCameraTarget2>();
+        private float cameraRotate = 0f;
+        private float cameraFov = 36f;
 
-        private Dictionary<string, HomuCameraTarget>
-            displayTargetMaterials = new Dictionary<string, HomuCameraTarget>();
+        private Vector2 cameraObjectScrollViewVector = Vector2.zero;
+        private Vector2 cameraMaterialScrollViewVector = Vector2.zero;
+        private Vector2 cameraNormalScrollViewVector = Vector2.zero;
+
+        private Vector2 displayObjectScrollViewVector = Vector2.zero;
+        private Vector2 displayMaterialScrollViewVector = Vector2.zero;
+
+        private Dictionary<string, GameObject> gameObjects = new Dictionary<string, GameObject>();
+        private Dictionary<string, HomuTarget> cameraMaterials = new Dictionary<string, HomuTarget>();
+        private Dictionary<string, HomuTarget2> cameraNormals = new Dictionary<string, HomuTarget2>();
+        private Dictionary<string, HomuTarget> displayMaterials = new Dictionary<string, HomuTarget>();
+
+        private string currentCameraGameObject = null;
+        private string currentCameraMaterial = null;
+        private string currentCameraNormal = null;
+        private string currentDisplayGameObject = null;
+        private string currentDisplayMaterial = null;
 
 
         private enum TargetLevel
@@ -165,9 +177,9 @@ namespace COM3D2.HomuCamera.Plugin
             return result;
         }
 
-        private Dictionary<string, HomuCameraTarget> searchMaterial(GameObject gameObject)
+        private Dictionary<string, HomuTarget> searchMaterial(GameObject gameObject)
         {
-            Dictionary<string, HomuCameraTarget> result = new Dictionary<string, HomuCameraTarget>();
+            Dictionary<string, HomuTarget> result = new Dictionary<string, HomuTarget>();
 
 
             var i = 0;
@@ -179,7 +191,7 @@ namespace COM3D2.HomuCamera.Plugin
                     if (skinnedMeshRenderer != null)
                     {
                         var mat = skinnedMeshRenderer.sharedMaterials[k];
-                        var data = new HomuCameraTarget();
+                        var data = new HomuTarget();
                         data.renderer = skinnedMeshRenderer;
                         data.material = mat;
                         data.gameObject = gameObject;
@@ -194,14 +206,14 @@ namespace COM3D2.HomuCamera.Plugin
             return result;
         }
 
-        private Dictionary<Vector3, HomuCameraTarget2> searchNormal(HomuCameraTarget target)
+        private Dictionary<string, HomuTarget2> searchNormal(HomuTarget target)
         {
             // サブメッシュなし
             if (target.renderer.sharedMesh.subMeshCount == 0)
             {
                 Debug.Log("サブメッシュなしは未対応");
 
-                return new Dictionary<Vector3, HomuCameraTarget2>();
+                return new Dictionary<string, HomuTarget2>();
             }
             else
             {
@@ -225,29 +237,36 @@ namespace COM3D2.HomuCamera.Plugin
 
                     var perp = Vector3.Cross(side1, side2).normalized;
 
-                    var normal = new Vector3(perp.x < 0.01 ? 0 : perp.x, perp.y < 0.01 ? 0 : perp.y,
-                        perp.z < 0.01 ? 0 : perp.z);
+                    var r = 0.01;
+
+                    var normal = new Vector3(
+                        perp.x > -r && perp.x < r ? 0 : perp.x,
+                        perp.y > -r && perp.y < r ? 0 : perp.y,
+                        perp.z > -r && perp.z < r ? 0 : perp.z);
 
                     vector3s.Add(normal);
                 }
 
                 Debug.Log("calc nomarls");
 
-                var result = new Dictionary<Vector3, HomuCameraTarget2>();
+                var result = new Dictionary<string, HomuTarget2>();
                 foreach (var n in vector3s)
                 {
-                    var r = new HomuCameraTarget2();
+                    var r = new HomuTarget2();
                     r.target = target;
                     r.normal = n;
-                    Debug.Log($"{n.x}-{n.y}-{n.z}");
-                    result.Add(n, r);
+                    var key = $"{n.x}-{n.y}-{n.z}";
+                    if (!result.ContainsKey(key))
+                    {
+                        result.Add(key, r);
+                    }
                 }
 
                 return result;
             }
         }
 
-        private void setCamera(HomuCameraTarget2 target)
+        private void setCamera(HomuTarget2 target)
         {
             // カメラを作成
             if (myCamBase != null)
@@ -298,19 +317,21 @@ namespace COM3D2.HomuCamera.Plugin
             //補正
             myCamBase.transform.forward = new Vector3(target.normal.x, target.normal.z, -target.normal.y);
 
+            // カメラの下を決定
+            myCamBase.transform.Rotate(myCamBase.transform.forward, cameraRotate);
+
             // 中心に設定
             myCamBase.transform.localPosition = new Vector3((xMax - xMin) / 2f + xMin, (zMax - zMin) / 2f + zMin,
                 -((yMax - yMin) / 2f + yMin));
 
-            // カメラの下を決定
-            //var rot = ssParam.fValue[PKeyMyCamera][PPKeyMyCameraRotate];
-            //myCamBase.transform.RotateAroundLocal(new Vector3(target.normal.x, target.normal.z, -target.normal.y), 10);
+            Debug.Log(myCamBase.transform.forward);
+
 
             // Globalを戻す
             target.target.gameObject.transform.eulerAngles = gAngle;
         }
 
-        private void setDisplay(HomuCameraTarget target)
+        private void setDisplay(HomuTarget target)
         {
             if (target.renderer.sharedMesh.subMeshCount == 0)
             {
@@ -354,7 +375,7 @@ namespace COM3D2.HomuCamera.Plugin
                     cam.farClipPlane = 1000f;
                     cam.rect = new Rect(xMin, yMin, xMax - xMin, yMax - yMin);
                     cam.transform.SetParent(myCamBase.transform);
-                    cam.fieldOfView = 35;
+                    cam.fieldOfView = cameraFov;
                     cam.targetTexture = eTex;
                 }
 
@@ -362,7 +383,7 @@ namespace COM3D2.HomuCamera.Plugin
             }
         }
 
-        class HomuCameraTarget
+        class HomuTarget
         {
             public GameObject gameObject;
             public Material material;
@@ -370,129 +391,338 @@ namespace COM3D2.HomuCamera.Plugin
             public int materialIndex;
         }
 
-        class HomuCameraTarget2
+        class HomuTarget2
         {
-            public HomuCameraTarget target;
+            public HomuTarget target;
             public Vector3 normal;
         }
 
         private void DoMainMenu(int winID)
         {
-            Rect baseRect = pv.InsideRect(this.winRect);
-            Rect headerRect = new Rect(baseRect.x, baseRect.y, baseRect.width, pv.Line("H3"));
-            Rect scrollRect = new Rect(baseRect.x, baseRect.y + headerRect.height + pv.Margin
-                , baseRect.width + pv.PropPx(5), baseRect.height - headerRect.height - pv.Margin);
-            Rect conRect = new Rect(0, 0, scrollRect.width - pv.Sys_("HScrollBar.Width") - pv.Margin, 0);
-            Rect outRect = new Rect();
-
             GUIStyle lStyle = "label";
             GUIStyle tStyle = "toggle";
             GUIStyle bStyle = "button";
+            GUIStyle sBStyle = new GUIStyle();
+
             Color color = new Color(1f, 1f, 1f, 0.98f);
+            Color selectedColor = new Color(0f, 0f, 1f, 0.98f);
 
             lStyle.normal.textColor = color;
             tStyle.normal.textColor = color;
             bStyle.normal.textColor = color;
+            sBStyle.normal.textColor = selectedColor;
+            var lStyleLineHeight = pv.Line("H3");
+            var bStyleLineHeight = pv.Line("C1");
             lStyle.fontSize = pv.Font("H3");
-            bStyle.fontSize = pv.Font("H1");
+            bStyle.fontSize = pv.Font("C1");
+            sBStyle.fontSize = pv.Font("C1");
+            lStyle.alignment = TextAnchor.UpperLeft;
+            tStyle.alignment = TextAnchor.UpperLeft;
+            bStyle.alignment = TextAnchor.UpperLeft;
+            sBStyle.alignment = TextAnchor.UpperLeft;
 
-            GUI.Label(headerRect, "Homu Camera", lStyle);
+            var baseRect = pv.InsideRect(this.winRect);
 
-            // スクロールビュー
-            scrollViewVector = GUI.BeginScrollView(scrollRect, scrollViewVector, conRect);
+            var objectSearchButton = new Rect(
+                baseRect.x,
+                baseRect.y,
+                baseRect.width + pv.PropPx(5),
+                bStyleLineHeight
+            );
 
-            outRect.Set(0, 0, conRect.width, 0);
-            outRect.height = pv.Line("H1");
+            var cameraHeaderRect = new Rect(
+                baseRect.x,
+                baseRect.y + objectSearchButton.height + pv.Margin,
+                baseRect.width / 2,
+                lStyleLineHeight);
 
-            GUIStyle winStyle = "box";
-            winStyle.fontSize = pv.Font("H1");
-            winStyle.alignment = TextAnchor.UpperRight;
+            var displayHeaderRect = new Rect(
+                baseRect.x + baseRect.width / 2 + pv.PropPx(5),
+                baseRect.y + objectSearchButton.height + pv.Margin,
+                baseRect.width / 2,
+                lStyleLineHeight);
 
-            if (GUI.Button(outRect, "Objectをサーチ", bStyle))
+            var cameraObjectScrollRect = new Rect(
+                baseRect.x,
+                baseRect.y + objectSearchButton.height + pv.Margin + cameraHeaderRect.height + pv.Margin,
+                baseRect.width / 2,
+                300);
+
+            var displayObjectScrollRect = new Rect(
+                baseRect.x + baseRect.width / 2 + pv.PropPx(5),
+                baseRect.y + objectSearchButton.height + pv.Margin + cameraHeaderRect.height + pv.Margin,
+                baseRect.width / 2,
+                300);
+
+            var cameraObjectInnerRect = new Rect(
+                0,
+                0,
+                cameraObjectScrollRect.width - pv.Sys_("HScrollBar.Width") - pv.Margin,
+                1200);
+
+            var displayObjectInnerRect = new Rect(
+                0,
+                0,
+                cameraObjectScrollRect.width - pv.Sys_("HScrollBar.Width") - pv.Margin,
+                1200);
+
+            var cameraMatericalRect = new Rect(
+                baseRect.x,
+                baseRect.y + objectSearchButton.height
+                           + pv.Margin + cameraHeaderRect.height
+                           + pv.Margin + cameraObjectScrollRect.height
+                           + pv.Margin,
+                baseRect.width / 2,
+                300);
+
+            var cameraMaterialInnerRect = new Rect(
+                0,
+                0,
+                cameraMatericalRect.width - pv.Sys_("HScrollBar.Width") - pv.Margin,
+                1200);
+
+            var displayMatericalRect = new Rect(
+                baseRect.x + baseRect.width / 2 + pv.PropPx(5),
+                baseRect.y + objectSearchButton.height
+                           + pv.Margin + displayHeaderRect.height
+                           + pv.Margin + displayObjectScrollRect.height
+                           + pv.Margin,
+                baseRect.width / 2,
+                300);
+
+            var displayMaterialInnerRect = new Rect(
+                0,
+                0,
+                displayMatericalRect.width - pv.Sys_("HScrollBar.Width") - pv.Margin,
+                1200);
+
+            var cameraNormalRect = new Rect(
+                baseRect.x,
+                baseRect.y + objectSearchButton.height
+                           + pv.Margin + cameraHeaderRect.height
+                           + pv.Margin + cameraObjectScrollRect.height
+                           + pv.Margin + cameraMatericalRect.height
+                           + pv.Margin,
+                baseRect.width / 2,
+                300);
+
+            var cameraNormalInnerRect = new Rect(
+                0,
+                0,
+                cameraNormalRect.width - pv.Sys_("HScrollBar.Width") - pv.Margin,
+                1200);
+
+            var currentCameraTargetRect = new Rect(
+                baseRect.x,
+                baseRect.y + objectSearchButton.height
+                           + pv.Margin + cameraHeaderRect.height
+                           + pv.Margin + cameraObjectScrollRect.height
+                           + pv.Margin + cameraMatericalRect.height
+                           + pv.Margin + cameraNormalRect.height
+                           + pv.Margin,
+                baseRect.width / 2,
+                lStyleLineHeight);
+
+            var currentDisplayTargetRect = new Rect(
+                baseRect.x + baseRect.width / 2 + pv.PropPx(5),
+                baseRect.y + objectSearchButton.height
+                           + pv.Margin + cameraHeaderRect.height
+                           + pv.Margin + cameraObjectScrollRect.height
+                           + pv.Margin + cameraMatericalRect.height
+                           + pv.Margin + cameraNormalRect.height
+                           + pv.Margin,
+                baseRect.width / 2,
+                lStyleLineHeight);
+
+            var cameraRotateSliderRect = new Rect(
+                baseRect.x,
+                baseRect.y + objectSearchButton.height
+                           + pv.Margin + cameraHeaderRect.height
+                           + pv.Margin + cameraObjectScrollRect.height
+                           + pv.Margin + cameraMatericalRect.height
+                           + pv.Margin + cameraNormalRect.height
+                           + pv.Margin + currentCameraTargetRect.height
+                           + pv.Margin,
+                baseRect.width / 2,
+                bStyleLineHeight);
+
+            var cameraFovSliderRect = new Rect(
+                baseRect.x,
+                baseRect.y + objectSearchButton.height
+                           + pv.Margin + cameraHeaderRect.height
+                           + pv.Margin + cameraObjectScrollRect.height
+                           + pv.Margin + cameraMatericalRect.height
+                           + pv.Margin + cameraNormalRect.height
+                           + pv.Margin + currentCameraTargetRect.height
+                           + pv.Margin + cameraRotateSliderRect.height
+                           + pv.Margin,
+                baseRect.width / 2,
+                bStyleLineHeight);
+
+            var setButtonRect = new Rect(
+                baseRect.x,
+                baseRect.y + objectSearchButton.height
+                           + pv.Margin + cameraHeaderRect.height
+                           + pv.Margin + cameraObjectScrollRect.height
+                           + pv.Margin + cameraMatericalRect.height
+                           + pv.Margin + cameraNormalRect.height
+                           + pv.Margin + currentCameraTargetRect.height
+                           + pv.Margin + cameraRotateSliderRect.height
+                           + pv.Margin + cameraFovSliderRect.height
+                           + pv.Margin,
+                baseRect.width,
+                bStyleLineHeight);
+
+
+            // header
+            GUI.Label(cameraHeaderRect, "Camera", lStyle);
+            GUI.Label(displayHeaderRect, "Display", lStyle);
+
+            // オブジェクト検索ボタン
+            if (GUI.Button(objectSearchButton, "Objectをサーチ", bStyle))
             {
-                keyValuePairs = searchObj();
+                gameObjects = searchObj();
+                cameraMaterials.Clear();
+                cameraNormals.Clear();
+                displayMaterials.Clear();
+                currentCameraGameObject = null;
+                currentCameraMaterial = null;
+                currentCameraNormal = null;
+                currentDisplayGameObject = null;
+                currentDisplayMaterial = null;
             }
 
-            outRect.height = pv.Line("H1");
-            foreach (var pair in keyValuePairs)
+            // Camera Objectスクロールビュー
+            cameraObjectScrollViewVector =
+                GUI.BeginScrollView(cameraObjectScrollRect, cameraObjectScrollViewVector, cameraObjectInnerRect, false,
+                    true);
+
+            var innerTargetRect = new Rect();
+            innerTargetRect.Set(0, 0, cameraObjectInnerRect.width, bStyleLineHeight);
+            foreach (var pair in gameObjects)
             {
-                conRect.height += pv.Line("C1");
-                outRect.y += outRect.height;
-                bStyle.fontSize = pv.Font("C1");
-                if (GUI.Button(outRect, $"[Camera Target Object] {pair.Key}", bStyle))
+                var style = pair.Key == currentCameraGameObject ? sBStyle : "button";
+
+                if (GUI.Button(innerTargetRect, $"[Object] {pair.Key}", style))
                 {
-                    keyValuePairs = new Dictionary<string, GameObject>
-                    {
-                        { pair.Key, pair.Value }
-                    };
-
-                    materials = searchMaterial(pair.Value);
+                    cameraMaterials = searchMaterial(pair.Value);
+                    currentCameraGameObject = pair.Key;
+                    cameraNormals.Clear();
+                    currentCameraMaterial = null;
+                    currentCameraNormal = null;
                 }
+
+                innerTargetRect.y += bStyleLineHeight;
             }
-
-            foreach (var pair in materials)
-            {
-                conRect.height += pv.Line("C1");
-                outRect.y += outRect.height;
-                bStyle.fontSize = pv.Font("C1");
-                if (GUI.Button(outRect, $"[Camera Target Material] {pair.Key}", bStyle))
-                {
-                    materials = new Dictionary<string, HomuCameraTarget>
-                    {
-                        { pair.Key, pair.Value }
-                    };
-                    normals = searchNormal(pair.Value);
-                }
-            }
-
-            foreach (var pair in normals)
-            {
-                conRect.height += pv.Line("C1");
-                outRect.y += outRect.height;
-                bStyle.fontSize = pv.Font("C1");
-                if (GUI.Button(outRect, $"[Camera Target Normal] {pair.Key.ToString()}", bStyle))
-                {
-                    normals = new Dictionary<Vector3, HomuCameraTarget2>
-                    {
-                        { pair.Key, pair.Value }
-                    };
-                    setCamera(pair.Value);
-                }
-            }
-
-            foreach (var pair in keyValuePairs)
-            {
-                conRect.height += pv.Line("C1");
-                outRect.y += outRect.height;
-                bStyle.fontSize = pv.Font("C1");
-                if (GUI.Button(outRect, $"[Display Target Object] {pair.Key}", bStyle))
-                {
-                    keyValuePairs = new Dictionary<string, GameObject>
-                    {
-                        { pair.Key, pair.Value }
-                    };
-
-                    displayTargetMaterials = searchMaterial(pair.Value);
-                }
-            }
-
-            foreach (var pair in displayTargetMaterials)
-            {
-                conRect.height += pv.Line("C1");
-                outRect.y += outRect.height;
-                bStyle.fontSize = pv.Font("C1");
-                if (GUI.Button(outRect, $"[Display Target Material] {pair.Key}", bStyle))
-                {
-                    materials = new Dictionary<string, HomuCameraTarget>
-                    {
-                        { pair.Key, pair.Value }
-                    };
-                    setDisplay(pair.Value);
-                }
-            }
-
 
             GUI.EndScrollView();
+
+            // Display Objectスクロールビュー
+            displayObjectScrollViewVector =
+                GUI.BeginScrollView(displayObjectScrollRect, displayObjectScrollViewVector, displayObjectInnerRect,
+                    false,
+                    true);
+
+            innerTargetRect.Set(0, 0, displayObjectInnerRect.width, bStyleLineHeight);
+            foreach (var pair in gameObjects)
+            {
+                var style = pair.Key == currentDisplayGameObject ? sBStyle : "button";
+
+                if (GUI.Button(innerTargetRect, $"[Object] {pair.Key}", style))
+                {
+                    displayMaterials = searchMaterial(pair.Value);
+                    currentDisplayGameObject = pair.Key;
+                }
+
+                innerTargetRect.y += bStyleLineHeight;
+            }
+
+            GUI.EndScrollView();
+
+            // Camera Materialスクロールビュー
+            cameraMaterialScrollViewVector =
+                GUI.BeginScrollView(cameraMatericalRect, cameraMaterialScrollViewVector, cameraMaterialInnerRect, false,
+                    true);
+
+            innerTargetRect.Set(0, 0, cameraMaterialInnerRect.width, bStyleLineHeight);
+            foreach (var pair in cameraMaterials)
+            {
+                var style = pair.Key == currentCameraMaterial ? sBStyle : "button";
+
+                if (GUI.Button(innerTargetRect, $"[Material] {pair.Key}", style))
+                {
+                    cameraNormals = searchNormal(pair.Value);
+                    currentCameraMaterial = pair.Key;
+                    currentCameraNormal = null;
+                }
+
+                innerTargetRect.y += bStyleLineHeight;
+            }
+
+            GUI.EndScrollView();
+
+            // display Materialスクロールビュー
+            displayMaterialScrollViewVector =
+                GUI.BeginScrollView(displayMatericalRect, displayMaterialScrollViewVector, displayMaterialInnerRect,
+                    false,
+                    true);
+
+            innerTargetRect.Set(0, 0, displayMaterialInnerRect.width, bStyleLineHeight);
+            foreach (var pair in displayMaterials)
+            {
+                var style = pair.Key == currentDisplayMaterial ? sBStyle : "button";
+
+                if (GUI.Button(innerTargetRect, $"[Material] {pair.Key}", style))
+                {
+                    currentDisplayMaterial = pair.Key;
+                }
+
+                innerTargetRect.y += bStyleLineHeight;
+            }
+
+            GUI.EndScrollView();
+
+            // Camera Normalスクロールビュー
+            cameraNormalScrollViewVector =
+                GUI.BeginScrollView(cameraNormalRect, cameraNormalScrollViewVector, cameraNormalInnerRect, false,
+                    true);
+
+            innerTargetRect.Set(0, 0, cameraNormalInnerRect.width, bStyleLineHeight);
+            foreach (var pair in cameraNormals)
+            {
+                var style = pair.Key == currentCameraNormal ? sBStyle : "button";
+
+                if (GUI.Button(innerTargetRect, $"[Normal] {pair.Key}", style))
+                {
+                    currentCameraNormal = pair.Key;
+                }
+
+                innerTargetRect.y += bStyleLineHeight;
+            }
+
+            GUI.EndScrollView();
+
+            GUI.Label(currentCameraTargetRect, currentCameraNormal != null ? "設定済み" : "未設定", lStyle);
+            GUI.Label(currentDisplayTargetRect, currentDisplayMaterial != null ? "設定済み" : "未設定", lStyle);
+
+            // カメラ回転
+            cameraRotate = GUI.HorizontalSlider(cameraRotateSliderRect, cameraRotate, 0, 360);
+
+            // カメラFOV
+
+            cameraFov = GUI.HorizontalSlider(cameraFovSliderRect, cameraFov, 0, 100);
+
+            // 設定ボタン
+            if (currentCameraNormal != null && currentDisplayMaterial != null)
+            {
+                if (GUI.Button(setButtonRect, "設定", bStyle))
+                {
+                    setCamera(cameraNormals[currentCameraNormal]);
+                    setDisplay(displayMaterials[currentDisplayMaterial]);
+                }
+            }
+
+
             GUI.DragWindow();
         }
 
