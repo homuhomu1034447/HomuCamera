@@ -14,7 +14,7 @@ Sybaris2が入っていることが条件です。
 
 ## ビルドのやり方
 
-1. ソースコードをpullしたらsolutionファイルをVCかRiderで開いてください。
+1. ソースコードをpullしたらsolutionファイルをVisualStudioかRiderで開いてください。
 2. 参照DLLにゲームフォルダに有る下記を追加してください。
  - COM3D2x64_Data\Managed\Assembly-CSharp.dll
  - COM3D2x64_Data\Managed\Assembly-CSharp-firstpass.dll
