@@ -21,6 +21,8 @@ namespace COM3D2.HomuCamera.Plugin
         private GameObject myCamBase;
         private float cameraRotate = 0f;
         private float cameraFov = 36f;
+        private int texScale = 1;
+        private float displayLuminess = 1f;
 
         private Vector2 cameraObjectScrollViewVector = Vector2.zero;
         private Vector2 cameraMaterialScrollViewVector = Vector2.zero;
@@ -344,7 +346,7 @@ namespace COM3D2.HomuCamera.Plugin
 
                 var uvs = target.renderer.sharedMesh.uv;
 
-                // submeshのboundを求める
+                // submeshのuv boundを求める
                 var xMin = 1000f;
                 var xMax = -1000f;
                 var yMin = 1000f;
@@ -362,11 +364,12 @@ namespace COM3D2.HomuCamera.Plugin
                     }
                 }
 
-                var tex = target.material.mainTexture;
-                var eTex = new RenderTexture(tex.width, tex.height, 24);
-
                 if (myCamBase != null)
                 {
+                    // 現状のテクスチャと同じアスペクト比のテクスチャを用意
+                    var currentTex = target.material.mainTexture;
+                    var newTex = new RenderTexture(currentTex.width * texScale, currentTex.height * texScale, 24);
+
                     Camera cam;
                     cam = myCamBase.AddComponent<Camera>();
                     cam.enabled = true;
@@ -376,10 +379,26 @@ namespace COM3D2.HomuCamera.Plugin
                     cam.rect = new Rect(xMin, yMin, xMax - xMin, yMax - yMin);
                     cam.transform.SetParent(myCamBase.transform);
                     cam.fieldOfView = cameraFov;
-                    cam.targetTexture = eTex;
-                }
+                    cam.targetTexture = newTex;
 
-                target.material.mainTexture = eTex;
+                    target.material.mainTexture = newTex;
+
+
+                    // materialの表面を処理
+                    target.material.SetColor("_RimColor", Color.black);
+                    target.material.SetFloat("_Shininess", 0f);
+                    target.material.SetFloat("_RimPower", 0f);
+                    target.material.SetFloat("_RimShift", 0f);
+
+                    Color color = target.material.color;
+                    color.r = displayLuminess; 
+                    color.g = displayLuminess;
+                    color.b = displayLuminess;
+                    color.a = 1;
+
+                    target.material.color = color;
+
+                }
             }
         }
 
@@ -546,6 +565,18 @@ namespace COM3D2.HomuCamera.Plugin
                 baseRect.width / 2,
                 bStyleLineHeight);
 
+            var displayLuminessSliderRect = new Rect(
+                baseRect.x + baseRect.width / 2 + pv.PropPx(5),
+                baseRect.y + objectSearchButton.height
+                           + pv.Margin + cameraHeaderRect.height
+                           + pv.Margin + cameraObjectScrollRect.height
+                           + pv.Margin + cameraMatericalRect.height
+                           + pv.Margin + cameraNormalRect.height
+                           + pv.Margin + currentCameraTargetRect.height
+                           + pv.Margin,
+                baseRect.width / 2,
+                bStyleLineHeight);
+
             var cameraFovSliderRect = new Rect(
                 baseRect.x,
                 baseRect.y + objectSearchButton.height
@@ -558,6 +589,7 @@ namespace COM3D2.HomuCamera.Plugin
                            + pv.Margin,
                 baseRect.width / 2,
                 bStyleLineHeight);
+
 
             var setButtonRect = new Rect(
                 baseRect.x,
@@ -709,8 +741,10 @@ namespace COM3D2.HomuCamera.Plugin
             cameraRotate = GUI.HorizontalSlider(cameraRotateSliderRect, cameraRotate, 0, 360);
 
             // カメラFOV
-
             cameraFov = GUI.HorizontalSlider(cameraFovSliderRect, cameraFov, 0, 100);
+
+            // ディスプレイ明るさ
+            displayLuminess = GUI.HorizontalSlider(displayLuminessSliderRect, displayLuminess, 0, 10);
 
             // 設定ボタン
             if (currentCameraNormal != null && currentDisplayMaterial != null)
